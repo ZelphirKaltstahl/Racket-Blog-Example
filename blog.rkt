@@ -11,20 +11,22 @@
 ; (provide (all-defined-out))
 
 (struct post (title body))
+(struct blog (posts) #:mutable)
 
 (define BLOG
-  (list (post "First Post!"
-              "Hey, this is my first post!")
-        (post "Second Post!"
-              "Haha! Another one!")
-        (post "Third Post!"
-              "Haha! <b>Another</b> one!")))
+  (blog (list (post "First Post!"
+                    "Hey, this is my first post!")
+              (post "Second Post!"
+                    "Haha! Another one!")
+              (post "Third Post!"
+                    "Haha! <b>Another</b> one!"))))
 
+;; Here the request starts to get handled.
 (define (start request)
-  (render-blog-page BLOG request))
+  (render-blog-page request))
 
-
-(define (render-blog-page blog request)
+;; Renders the blog page and specifies a handler for the form action.
+(define (render-blog-page request)
   (define (response-generator embed/url)
     (response/xexpr
       `(html
@@ -32,7 +34,7 @@
          (body
            (h1 "My Racket Blog :)")
            (div ((class "content"))
-             ,(render-multiple-posts blog))
+             ,(render-posts))
            (form
              ((action ,(embed/url insert-post-handler)))
   
@@ -48,16 +50,13 @@
 
   ;; render blog page with blog posts plus the new blog post from the request
   (define (insert-post-handler request)
-    (render-blog-page
-      (cons
-        (parse-post (request-bindings request))
-        blog)
-      request))
+    (blog-insert-post! (parse-post (request-bindings request)))
+    (render-blog-page request))
 
   ;; ???
   (send/suspend/dispatch response-generator))
 
-(define (render-multiple-posts list-of-posts)
+(define (render-posts)
   ;; This function uses the ,@ notation.
   ;; The backtick allows for S-Expressions to be evaluated inside the quoted expression.
   ;; , allows evaluating of an S-Expression inside the backtick quoted expression
@@ -66,13 +65,13 @@
   ;; We only want to splice them into our code.
   ;; So we have to use ,@ instead.
   `(div ((class "posts-container"))
-     ,@(map render-post list-of-posts)))
+     ,@(map render-post (blog-posts BLOG))))
 
 ;; renders a post as HTML
-(define (render-post apost)
+(define (render-post a-post)
   `(div ((class "post"))
-     (h1 ,(post-title apost))
-     (p ,(post-body apost))))
+     (h1 ,(post-title a-post))
+     (p ,(post-body a-post))))
 
 ;; checks if bindings contain the symbols of a post
 (define (can-parse-post? bindings)
@@ -85,5 +84,12 @@
   (post
     (extract-binding/single 'title bindings)
     (extract-binding/single 'body bindings)))
+
+;; ATTENTION: THIS FUNCTION HAS SIDE EFFECTS!!!
+;; ALSO FUNCTIONS USING THIS FUNCTION HAVE SIDE EFFECTS!!!
+(define (blog-insert-post! a-post)
+  (set-blog-posts!
+    BLOG
+    (cons a-post (blog-posts BLOG))))
 
 
