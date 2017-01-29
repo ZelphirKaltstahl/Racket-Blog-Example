@@ -1,128 +1,147 @@
 #lang web-server/insta
 
-; (require rackunit)
-(define (Mb-to-B n) (* n 1024 1024))
-(define MAX-BYTES (Mb-to-B 64))
-(define nil '())
-(define true #t)
-(define false #f)
-(custodian-limit-memory (current-custodian) MAX-BYTES)
-; racket -l errortrace -t blog.rkt
-; (provide (all-defined-out))
-
-(struct blog (posts) #:mutable)
-(struct post (title body comments) #:mutable)
-
-(define BLOG
-  (blog
-   (list (post "Second Post"
-               "This is another post"
-               (list))
-         (post "First Post"
-               "This is my first post"
-               (list "First comment!")))))
-
-(define (blog-insert-post! a-blog a-post)
-  (set-blog-posts!
-    a-blog
-    (cons a-post (blog-posts a-blog))))
-
-(define (post-insert-comment! a-post a-comment)
-  (set-post-comments!
-   a-post
-   (cons (post-comments a-post) (list a-comment))))
+(require "model.rkt")
 
 ; start: request -> doesn't return
-; Consumes a request, and produces a page that displays
+; Consumes a request and produces a page that displays
 ; all of the web content.
 (define (start request)
-  (render-blog-page request))
+  (render-blog-page (initialize-blog! (build-path (current-directory) "the-blog-data.db"))
+                    request))
 
 ; render-blog-page: request -> doesn't return
 ; Produces an HTML page of the content of the
-; BLOG.
-(define (render-blog-page request)
+(define (render-blog-page a-blog request)
   (define (response-generator embed/url)
     (response/xexpr
-     `(html (head (title "My Blog"))
+     `(html ,(render-html-head #:title "My Blog")
             (body
-             (h1 "My Blog")
-             ,(render-posts embed/url)
-             (form ((action ,(embed/url insert-post-handler)))
-                   (input ((name "title")))
-                   (input ((name "body")))
-                   (input ((type "submit"))))))))
+            (h1 "My Blog")
+            ,(render-posts a-blog embed/url)
+            (form ((action ,(embed/url insert-post-handler)))
+                  (input ((type "text") (name "title")))
+                  (input ((type "text") (name "body")))
+                  (input ((type "submit"))))))))
+
+  ; parse-post: bindings -> post
+  ; Extracts a post out of the bindings.
+  (define (parse-post bindings)
+    (post (extract-binding/single 'title bindings)
+          (extract-binding/single 'body bindings)
+          (list)))
 
   (define (insert-post-handler request)
     (blog-insert-post!
-      BLOG
-      (parse-post (request-bindings request)))
-    (render-blog-page request))
+      a-blog
+      (post-title (parse-post (request-bindings request)))
+      (post-body (parse-post (request-bindings request)))
+      (post-comments (parse-post (request-bindings request))))
+    (render-blog-page a-blog (redirect/get)))
 
   (send/suspend/dispatch response-generator))
 
-; parse-post: bindings -> post
-; Extracts a post out of the bindings.
-(define (parse-post bindings)
-  (post (extract-binding/single 'title bindings)
-        (extract-binding/single 'body bindings)
-        (list)))
-
 ; render-post-detail-page: post request -> doesn't return
-; Consumes a post and request, and produces a detail page
-; of the post. The user will be able to insert new comments.
-(define (render-post-detail-page a-post request)
+; Consumes a post and produces a detail page of the post.
+; The user will be able to either insert new comments
+; or go back to render-blog-page.
+(define (render-post-detail-page a-blog a-post request)
   (define (response-generator embed/url)
     (response/xexpr
-     `(html (head (title "Post Details"))
-            (body
-             (h1 "Post Details")
-             (h2 ,(post-title a-post))
-             (p ,(post-body a-post))
-             ,(render-as-itemized-list
-               (post-comments a-post))
-             (form ((action
-                     ,(embed/url insert-comment-handler)))
-                   (input ((name "comment")))
-                   (input ((type "submit"))))))))
+      `(html ,(render-html-head #:title "Post Details")
+             (body (h1 "Post Details")
+                   (h2 ,(post-title a-post))
+                   (p ,(post-body a-post))
+                   ,(render-as-itemized-list
+                     (post-comments a-post))
+                   (form ((action ,(embed/url insert-comment-handler)))
+                         (input ((name "comment")))
+                         (input ((type "submit"))))
+                   (a ((href ,(embed/url back-handler)))
+                      "Back to the blog")))))
 
   (define (parse-comment bindings)
     (extract-binding/single 'comment bindings))
 
-  (define (insert-comment-handler a-request)
-    (post-insert-comment!
-     a-post (parse-comment (request-bindings a-request)))
-    (render-post-detail-page a-post a-request))
+  (define (insert-comment-handler request)
+    (render-confirm-add-comment-page
+     (parse-comment (request-bindings request))
+     a-post
+     a-blog
+     (redirect/get)))
+
+  (define (back-handler request)
+    (render-blog-page a-blog request))
   (send/suspend/dispatch response-generator))
 
+; render-confirm-add-comment-page :
+; comment post request -> doesn't return
+; Consumes a comment that we intend to add to a post, as well
+; as the request. If the user follows through, adds a comment 
+; and goes back to the display page. Otherwise, goes back to 
+; the detail page of the post.
+(define (render-confirm-add-comment-page a-comment a-post a-blog request)
+  (define (response-generator embed/url)
+    (response/xexpr
+     `(html ,(render-html-head #:title "Add a Comment")
+            (body (h1 "Add a Comment")
+                  (p "The comment: ")
+                  (div (p ,a-comment))
+                  (p "will be added to ")
+                  (div ,(post-title a-post))
+                  (p (a ((href ,(embed/url yes-handler)))
+                        "Yes, add the comment."))
+                  (p (a ((href ,(embed/url cancel-handler)))
+                        "No, I changed my mind!"))))))
+
+  (define (yes-handler request)
+    (post-insert-comment! a-blog a-post a-comment)
+    (render-post-detail-page a-blog a-post request))
+
+  (define (cancel-handler request)
+    (render-post-detail-page a-blog a-post request))
+  (send/suspend/dispatch response-generator))
 
 ; render-post: post (handler -> string) -> xexpr
 ; Consumes a post, produces an xexpr fragment of the post.
 ; The fragment contains a link to show a detailed view of the post.
-(define (render-post a-post embed/url)
+(define (render-post a-blog a-post embed/url)
   (define (view-post-handler request)
-    (render-post-detail-page a-post request))
+    (render-post-detail-page a-blog a-post request))
   `(div ((class "post"))
-        (a ((href ,(embed/url view-post-handler)))
-          (h1 ,(post-title a-post)))
+        (h1
+          (a ((href ,(embed/url view-post-handler)))
+             ,(post-title a-post)))
         (p ,(post-body a-post))
         (div ,(number->string (length (post-comments a-post)))
              " comment(s)")))
 
 ; render-posts: (handler -> string) -> xexpr
-; Consumes a embed/url, and produces an xexpr fragment
+; Consumes a embed/url, produces an xexpr fragment
 ; of all its posts.
-(define (render-posts embed/url)
-  ;; We only define this function, so that we can use it
-  ;; in the application of map on the list of blog posts.
-  (define (render-post-with-embed-url a-post)
-    (render-post a-post embed/url))
-
+(define (render-posts a-blog embed/url)
+  (define (render-post/embed/url a-post)
+    (render-post a-blog a-post embed/url))
   `(div ((class "posts"))
-    ,@(map render-post-with-embed-url (blog-posts BLOG))))
+        ,@(map render-post/embed/url (blog-posts a-blog))))
 
+; render-as-itemized-list: (listof xexpr) -> xexpr
+; Consumes a list of items, and produces a rendering as
+; an unorderered list.
 (define (render-as-itemized-list fragments)
   `(ul ,@(map render-as-item fragments)))
 
+; render-as-item: xexpr -> xexpr
+; Consumes an xexpr, and produces a rendering
+; as a list item.
 (define (render-as-item a-fragment)
   `(li ,a-fragment))
+
+(define (render-html-head #:title [title "no title set"])
+  `(head (title ,title)
+         ,(include-css-files)))
+
+(define include-css-files
+  (lambda ()
+    `(link ((rel "stylesheet") (href "/general.css") (type "text/css")))))
+
+(static-files-path "css")
