@@ -1,6 +1,7 @@
 #lang web-server/insta
 
-(require "model.rkt")
+(require "model.rkt"
+         web-server/formlets)
 
 ; start: request -> doesn't return
 ; Consumes a request and produces a page that displays
@@ -22,23 +23,18 @@
                    (h1 "My Blog")
                    ,(render-posts a-blog embed/url)
                    (form ((action ,(embed/url insert-post-handler)))
-                         (input ((type "text") (name "title")))
-                         (input ((type "text") (name "body")))
-                         (input ((type "submit"))))))))
-
-    ; parse-post: bindings -> post
-    ; Extracts a post out of the bindings.
-    (define (parse-post bindings)
-        (post (extract-binding/single 'title bindings)
-              (extract-binding/single 'body bindings)
-              (list)))
+                         ;; embed the formlet
+                         ,@(formlet-display new-post-formlet)
+                         (input ([type "submit"])))))))
 
     (define (insert-post-handler request)
-        (blog-insert-post!
-            a-blog
-            (post-title (parse-post (request-bindings request)))
-            (post-body (parse-post (request-bindings request)))
-            (post-comments (parse-post (request-bindings request))))
+        ;; get the values from the formular / formlet
+        (define-values
+            (title body)
+            (formlet-process new-post-formlet request))
+        ;; insert the values we got as a new post for this blog
+        (blog-insert-post! a-blog title body)
+        ;; render again, preventing double submit by redirection
         (render-blog-page a-blog (redirect/get)))
 
     (send/suspend/dispatch response-generator))
@@ -143,6 +139,16 @@
 (define (render-html-head #:title [title "no title set"])
     `(head (title ,title)
            ,(include-css-files)))
+
+(define new-post-formlet
+    (formlet
+        ;; #%# introduces a list of X-expressions
+        (#%#
+            ;; adding input fields to the formlet
+            ;; the rhs of => is bound to the result of the subformlet (input element)
+            ,{=> input-string title}
+            ,{=> input-string body})
+        (values title body)))
 
 (define include-css-files
     (lambda ()
