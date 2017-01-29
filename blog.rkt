@@ -1,4 +1,7 @@
-#lang web-server/insta
+#lang racket
+
+(require web-server/servlet)
+(provide/contract (start (-> request? response?)))
 
 (require "model.rkt"
          web-server/formlets)
@@ -167,4 +170,21 @@
     (lambda ()
         `(link ((rel "stylesheet") (href "/general.css") (type "text/css")))))
 
-(static-files-path "css")
+;; ===========================
+;; ADDED FOR RUNNING A SERVLET
+;; ===========================
+(require web-server/servlet-env)
+(serve/servlet start
+               ;; should racket show the servlet running in a browser upon startup?
+               #:launch-browser? true
+               #:quit? false
+               ;; the server will listen on ALL available IP addresses, not only on one specified
+               #:listen-ip false
+               ;; the port on which the servlet is running
+               #:port 8000
+               ;; directory for static files
+               ;; (css inside static)
+               #:extra-files-paths (list (build-path "static" "css"))
+               ;; *.rkt should be the name of the application
+               #:servlet-path "/servlets/blog.rkt")
+
