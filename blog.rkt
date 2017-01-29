@@ -52,7 +52,7 @@
                          (p ,(post-body a-post))
                          ,(render-as-itemized-list (post-comments a-post))
                          (form ((action ,(embed/url insert-comment-handler)))
-                               (input ((name "comment")))
+                               ,@(formlet-display new-comment-formlet)
                                (input ((type "submit"))))
                          (a ((href ,(embed/url back-handler)))
                             "Back to the blog")))))
@@ -61,11 +61,12 @@
         (extract-binding/single 'comment bindings))
 
     (define (insert-comment-handler request)
-        (render-confirm-add-comment-page
-            (parse-comment (request-bindings request))
-            a-post
-            a-blog
-            (redirect/get)))
+        ;; get the values from the request
+        (define-values (comment) (formlet-process new-comment-formlet request))
+        (render-confirm-add-comment-page comment
+                                         a-post
+                                         a-blog
+                                         (redirect/get)))
 
     (define (back-handler request)
         (render-blog-page a-blog request))
@@ -144,11 +145,23 @@
     (formlet
         ;; #%# introduces a list of X-expressions
         (#%#
-            ;; adding input fields to the formlet
-            ;; the rhs of => is bound to the result of the subformlet (input element)
-            ,{=> input-string title}
-            ,{=> input-string body})
+            ,(=>
+                (to-string (required (text-input #:attributes '([class "form-text"]))))
+                title)
+            ,(=>
+                (to-string (required (text-input #:attributes '([class "form-text"]))))
+                body))
         (values title body)))
+
+; (define new-comment-formlet
+;     (formlet
+;         (#%#
+;             ,(=>
+;                 (to-string (required (text-input #:attributes '([class "form-text"]))))
+;                 comment))
+;         (values comment)))
+
+(define new-comment-formlet input-string)
 
 (define include-css-files
     (lambda ()
